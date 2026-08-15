@@ -3,7 +3,8 @@ version: "3.8"
 services:
   delfos:
     # IMAGEM DO GHCR (GitHub Container Registry)
-    image: ghcr.io/flaviosantti/delfos:1.0.0
+    # Sem esta imagem publicada, o Swarm fica 0/1 (task não sobe).
+    image: ghcr.io/flaviosantti/delfos:latest
 
     environment:
       NODE_ENV: "production"
@@ -16,9 +17,6 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY}"
       ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
       SESSION_SECRET: "${SESSION_SECRET}"
-      # Opcional — o app não usa Postgres direto em runtime.
-      # Preencha só no Portainer (Environment variables), nunca neste YAML:
-      # DATABASE_URL: "${DATABASE_URL}"
 
     deploy:
       replicas: 1
