@@ -1,22 +1,19 @@
 import React, { useState } from 'react';
-import { X, Code2, Copy, Check, Download, FileCode, ExternalLink } from 'lucide-react';
-import { IntegrationConfig } from '../types';
+import { X, Code2, Copy, Check, Download, FileCode } from 'lucide-react';
 import { generateStandaloneHtml } from '../utils/exportHtml';
 
 interface HtmlExportModalProps {
   isOpen: boolean;
   onClose: () => void;
-  config: IntegrationConfig;
 }
 
 export const HtmlExportModal: React.FC<HtmlExportModalProps> = ({
   isOpen,
   onClose,
-  config
 }) => {
   if (!isOpen) return null;
 
-  const htmlCode = generateStandaloneHtml(config);
+  const htmlCode = generateStandaloneHtml();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = () => {
@@ -65,7 +62,7 @@ export const HtmlExportModal: React.FC<HtmlExportModalProps> = ({
           <div className="flex items-center gap-2">
             <Code2 className="w-4 h-4 text-blue-600 shrink-0" />
             <span>
-              Este arquivo contém todo o <strong>Tailwind CSS (CDN)</strong>, <strong>Lucide Icons (CDN)</strong> e o <strong>JavaScript</strong> com chamadas REST API para Supabase e n8n.
+              Este arquivo envia o formulário para <strong>/api/diagnostico</strong> na mesma origem. Não embute chaves Supabase nem webhook n8n.
             </span>
           </div>
 
@@ -96,7 +93,7 @@ export const HtmlExportModal: React.FC<HtmlExportModalProps> = ({
 
         {/* Footer */}
         <div className="p-4 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
-          <span>Substitua as constantes <code className="bg-slate-200 text-slate-800 px-1 rounded font-mono">SUPABASE_URL</code> e <code className="bg-slate-200 text-slate-800 px-1 rounded font-mono">N8N_WEBHOOK_URL</code> no arquivo se necessário.</span>
+          <span>Hospede este HTML no mesmo host da API Express. Sem secrets no arquivo.</span>
           <button
             onClick={onClose}
             className="px-4 py-1.5 rounded-xl text-xs font-bold bg-slate-200 hover:bg-slate-300 text-slate-800 transition"

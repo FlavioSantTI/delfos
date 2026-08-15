@@ -1,37 +1,10 @@
--- Script SQL para criação da tabela no PostgreSQL / Supabase
--- Executar no SQL Editor. Leitura e exclusão de PII ficam na API autenticada (service_role no servidor).
-
-CREATE TABLE IF NOT EXISTS public.diagnostico_ia (
-    id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-    nome TEXT NOT NULL,
-    whatsapp TEXT NOT NULL,
-    email TEXT NOT NULL,
-    empresa TEXT NOT NULL,
-    setor TEXT,
-    porte TEXT,
-    estagio_ia TEXT NOT NULL,
-    ferramentas TEXT,
-    areas_aplicacao TEXT,
-    obstaculo TEXT,
-    objetivo TEXT,
-    processo_especifico TEXT,
-    classificacao_nivel TEXT,
-    status_processamento TEXT DEFAULT 'pending',
-    lgpd_consent_at TIMESTAMPTZ,
-    lgpd_term_version TEXT
-);
+-- Aplicar no SQL Editor do Supabase (o app não usa CLI de migrations).
+-- Idempotente: ENABLE RLS, policies mínimas, view com security_invoker.
 
 ALTER TABLE public.diagnostico_ia
   ADD COLUMN IF NOT EXISTS lgpd_consent_at TIMESTAMPTZ;
 ALTER TABLE public.diagnostico_ia
   ADD COLUMN IF NOT EXISTS lgpd_term_version TEXT;
-
-COMMENT ON TABLE public.diagnostico_ia IS 'Respostas do formulário de Diagnóstico de Maturidade em IA';
-COMMENT ON COLUMN public.diagnostico_ia.estagio_ia IS 'Estágio selecionado pelo usuário';
-COMMENT ON COLUMN public.diagnostico_ia.status_processamento IS 'Status para automação (pending, processed, sent_whatsapp)';
-COMMENT ON COLUMN public.diagnostico_ia.lgpd_consent_at IS 'Timestamp do consentimento LGPD';
-COMMENT ON COLUMN public.diagnostico_ia.lgpd_term_version IS 'Versão do termo aceito';
 
 ALTER TABLE public.diagnostico_ia ENABLE ROW LEVEL SECURITY;
 
@@ -55,6 +28,10 @@ CREATE POLICY diagnostico_ia_authenticated_delete
   FOR DELETE
   TO authenticated
   USING (true);
+
+DROP POLICY IF EXISTS "Permitir Inserção Pública" ON public.diagnostico_ia;
+DROP POLICY IF EXISTS "Permitir Leitura Pública" ON public.diagnostico_ia;
+DROP POLICY IF EXISTS "Permitir Exclusão Pública" ON public.diagnostico_ia;
 
 REVOKE ALL ON public.diagnostico_ia FROM PUBLIC;
 GRANT INSERT ON public.diagnostico_ia TO anon;

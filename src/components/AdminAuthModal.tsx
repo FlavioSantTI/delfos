@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Lock, ShieldCheck, KeyRound, AlertCircle, Loader2, X } from 'lucide-react';
+import { storeCsrfToken } from '../lib/adminApi';
 
 interface AdminAuthModalProps {
   isOpen: boolean;
@@ -31,32 +32,22 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
     try {
       const response = await fetch('/api/admin/auth', {
         method: 'POST',
+        credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ password })
       });
 
-      const data = await response.json();
+      const data = await response.json().catch(() => ({}));
 
       if (response.ok && data.success) {
-        // Store token/flag in sessionStorage for current session
-        sessionStorage.setItem('admin_authenticated', 'true');
-        if (data.token) {
-          sessionStorage.setItem('admin_token', data.token);
-        }
+        storeCsrfToken(data.csrfToken || '');
         setPassword('');
         onSuccess();
       } else {
         setError(data.error || 'Senha incorreta. Acesso negado.');
       }
-    } catch (err: any) {
-      // Fallback for offline or local preview
-      if (password === 'admin123' || password === 'flaviosantiago') {
-        sessionStorage.setItem('admin_authenticated', 'true');
-        setPassword('');
-        onSuccess();
-      } else {
-        setError('Senha incorreta ou erro de conexão.');
-      }
+    } catch {
+      setError('Não foi possível validar a sessão. Tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -65,7 +56,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-xs animate-in fade-in">
       <div className="bg-[#2A3A4A] border border-slate-700/80 rounded-3xl w-full max-w-md p-6 text-white shadow-2xl relative">
-        {/* Close Button */}
         <button
           onClick={onClose}
           className="absolute top-4 right-4 p-2 text-slate-400 hover:text-white rounded-full hover:bg-slate-800 transition"
@@ -73,7 +63,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
           <X className="w-5 h-5" />
         </button>
 
-        {/* Header */}
         <div className="flex items-center gap-3 mb-4">
           <div className="w-12 h-12 rounded-2xl bg-[#349885]/10 border border-[#349885]/30 flex items-center justify-center text-[#349885]">
             <Lock className="w-6 h-6" />
@@ -84,7 +73,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
           </div>
         </div>
 
-        {/* Form */}
         <form onSubmit={handleLogin} className="space-y-4 mt-6">
           <div>
             <label className="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2">
@@ -102,6 +90,7 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
                 placeholder="Digite a senha de acesso..."
                 className="w-full bg-slate-800/90 border border-slate-700 focus:border-[#349885] focus:ring-1 focus:ring-[#349885] text-white pl-11 pr-4 py-3 rounded-xl text-sm outline-none transition"
                 autoFocus
+                autoComplete="current-password"
               />
             </div>
             {error && (
@@ -131,10 +120,6 @@ export const AdminAuthModal: React.FC<AdminAuthModalProps> = ({
               )}
             </button>
           </div>
-
-          <p className="text-[11px] text-center text-slate-400 pt-2">
-            Senha padrão de acesso do consultor: <span className="font-mono text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded">admin123</span>
-          </p>
         </form>
       </div>
     </div>

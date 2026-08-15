@@ -95,7 +95,7 @@ export const Step3Goals: React.FC<Step3Props> = ({
             <label className="flex items-start gap-3 cursor-pointer select-none">
               <input
                 type="checkbox"
-                checked={formData.lgpdConsent ?? true}
+                checked={formData.lgpdConsent === true}
                 onChange={(e) => onChange('lgpdConsent', e.target.checked)}
                 className="mt-1 w-4 h-4 text-[#349885] rounded border-slate-300 focus:ring-[#349885] cursor-pointer shrink-0"
               />
@@ -104,7 +104,7 @@ export const Step3Goals: React.FC<Step3Props> = ({
                   <ShieldCheck className="w-4 h-4 text-[#349885] shrink-0 inline" />
                   Privacidade & Conformidade LGPD (Lei nº 13.709/2018)
                 </span>
-                Concordo com o tratamento dos dados informados exclusivamente para geração do relatório de diagnóstico de maturidade em IA e envio de recomendações estratégicas. Seus dados estão seguros e não serão compartilhados com terceiros.
+                Concordo com o tratamento dos dados informados para geração do relatório de diagnóstico de maturidade em IA, contato do consultor e automações operacionais (incluindo WhatsApp e ferramentas internas). Os dados não serão vendidos. Posso solicitar exclusão pelos canais do consultor.
               </div>
             </label>
             {errors.lgpdConsent && (

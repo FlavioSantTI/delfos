@@ -31,15 +31,8 @@ import {
   Users,
   Check
 } from 'lucide-react';
-import {
-  fetchDiagnosticosFromSupabase,
-  deleteDiagnosticoFromSupabase,
-  fetchViewRelatorioFromSupabase,
-  fetchTabelaRelatorioFromSupabase,
-  fetchRelatorioFromSupabase,
-  DiagnosticoRecord,
-  RelatorioDiagnosticoRecord
-} from '../lib/supabase';
+import { DiagnosticoRecord, RelatorioDiagnosticoRecord } from '../lib/supabase';
+import { adminFetch } from '../lib/adminApi';
 
 interface ReportsViewProps {
   onClose?: () => void;
@@ -91,31 +84,30 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
     setError(null);
 
     try {
-      // 1. Fetch diagnostico_ia
-      const res = await fetch('/api/reports');
-      const json = await res.json();
+      const res = await adminFetch('/api/reports');
+      const json = await res.json().catch(() => ({}));
+      if (res.status === 401) {
+        setRecords([]);
+        setViewRecords([]);
+        setRelatorioRecords([]);
+        setError('Sessão expirada ou não autenticada. Faça login novamente.');
+        return;
+      }
       if (res.ok && json.success) {
         setRecords(json.data || []);
       } else {
-        const clientRes = await fetchDiagnosticosFromSupabase();
-        if (clientRes.success) {
-          setRecords(clientRes.data || []);
-        } else {
-          setError(clientRes.error || json.error || 'Erro ao carregar os diagnósticos.');
-        }
+        setError(json.error || 'Erro ao carregar os diagnósticos.');
       }
 
-      // 2. Fetch View: vw_relatorio_diagnostico_ia
       try {
-        const viewRes = await fetch('/api/reports/view_relatorio');
-        const viewJson = await viewRes.json();
-        if (viewJson.success && viewJson.data && viewJson.data.length > 0) {
-          setViewRecords(viewJson.data);
-          setHasViewTable(true);
+        const viewRes = await adminFetch('/api/reports/view_relatorio');
+        if (viewRes.status === 401) {
+          setError('Sessão expirada ou não autenticada. Faça login novamente.');
+          setHasViewTable(false);
         } else {
-          const clientView = await fetchViewRelatorioFromSupabase();
-          if (clientView.success && clientView.data && clientView.data.length > 0) {
-            setViewRecords(clientView.data);
+          const viewJson = await viewRes.json().catch(() => ({}));
+          if (viewJson.success && viewJson.data && viewJson.data.length > 0) {
+            setViewRecords(viewJson.data);
             setHasViewTable(true);
           } else {
             setHasViewTable(false);
@@ -125,17 +117,15 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
         setHasViewTable(false);
       }
 
-      // 3. Fetch Tabela Física: relatorio_diagnostico_ia
       try {
-        const relRes = await fetch('/api/reports/tabela_relatorio');
-        const relJson = await relRes.json();
-        if (relJson.success && relJson.data && relJson.data.length > 0) {
-          setRelatorioRecords(relJson.data);
-          setHasRelatorioTable(true);
+        const relRes = await adminFetch('/api/reports/tabela_relatorio');
+        if (relRes.status === 401) {
+          setError('Sessão expirada ou não autenticada. Faça login novamente.');
+          setHasRelatorioTable(false);
         } else {
-          const clientRel = await fetchTabelaRelatorioFromSupabase();
-          if (clientRel.success && clientRel.data && clientRel.data.length > 0) {
-            setRelatorioRecords(clientRel.data);
+          const relJson = await relRes.json().catch(() => ({}));
+          if (relJson.success && relJson.data && relJson.data.length > 0) {
+            setRelatorioRecords(relJson.data);
             setHasRelatorioTable(true);
           } else {
             setHasRelatorioTable(false);
@@ -146,13 +136,8 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
       }
 
     } catch (err: any) {
-      console.warn('Erro ao carregar via API, tentando SDK direto...', err);
-      const clientRes = await fetchDiagnosticosFromSupabase();
-      if (clientRes.success) {
-        setRecords(clientRes.data || []);
-      } else {
-        setError('Não foi possível conectar ao banco de dados Supabase.');
-      }
+      console.warn('Erro ao carregar via API autenticada.', err);
+      setError('Não foi possível carregar os relatórios. Faça login novamente.');
     } finally {
       setLoading(false);
     }
@@ -168,7 +153,11 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
     }
 
     try {
-      const res = await fetch(`/api/reports/${id}`, { method: 'DELETE' });
+      const res = await adminFetch(`/api/reports/${id}`, { method: 'DELETE' });
+      if (res.status === 401) {
+        alert('Sessão expirada ou não autenticada. Faça login novamente.');
+        return;
+      }
       if (res.ok) {
         setRecords(prev => prev.filter(r => r.id !== id));
         showToast(`Diagnóstico de "${empresaName}" excluído com sucesso.`);
@@ -176,16 +165,7 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
           setSelectedRecord(null);
         }
       } else {
-        const clientRes = await deleteDiagnosticoFromSupabase(id);
-        if (clientRes.success) {
-          setRecords(prev => prev.filter(r => r.id !== id));
-          showToast(`Diagnóstico de "${empresaName}" excluído com sucesso.`);
-          if (selectedRecord?.id === id) {
-            setSelectedRecord(null);
-          }
-        } else {
-          alert('Erro ao excluir registro.');
-        }
+        alert('Erro ao excluir registro.');
       }
     } catch {
       alert('Erro de conexão ao excluir.');
@@ -412,7 +392,14 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
     return { total, avgScore, topStage, topSector };
   }, [records]);
 
-  // Export CSV helper
+  const csvCell = (value: unknown): string => {
+    let s = String(value ?? '');
+    if (/^[=+\-@\t\r]/.test(s)) {
+      s = `'${s}`;
+    }
+    return `"${s.replace(/"/g, '""')}"`;
+  };
+
   const handleExportCSV = () => {
     if (activeTab === 'diagnostico_ia') {
       if (filteredRecords.length === 0) {
@@ -439,21 +426,21 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
       ];
 
       const rows = filteredRecords.map(r => [
-        `"${r.id}"`,
-        `"${new Date(r.created_at).toLocaleString('pt-BR')}"`,
-        `"${r.nome || ''}"`,
-        `"${r.whatsapp || ''}"`,
-        `"${r.email || ''}"`,
-        `"${r.empresa || ''}"`,
-        `"${r.setor || ''}"`,
-        `"${r.porte || ''}"`,
-        `"${r.estagio_ia || ''}"`,
-        `"${r.ferramentas || ''}"`,
-        `"${r.areas_aplicacao || ''}"`,
-        `"${r.obstaculo || ''}"`,
-        `"${r.objetivo || ''}"`,
-        `"${(r.processo_especifico || '').replace(/"/g, '""')}"`,
-        `"${r.classificacao_nivel || ''}"`
+        csvCell(r.id),
+        csvCell(new Date(r.created_at).toLocaleString('pt-BR')),
+        csvCell(r.nome || ''),
+        csvCell(r.whatsapp || ''),
+        csvCell(r.email || ''),
+        csvCell(r.empresa || ''),
+        csvCell(r.setor || ''),
+        csvCell(r.porte || ''),
+        csvCell(r.estagio_ia || ''),
+        csvCell(r.ferramentas || ''),
+        csvCell(r.areas_aplicacao || ''),
+        csvCell(r.obstaculo || ''),
+        csvCell(r.objetivo || ''),
+        csvCell(r.processo_especifico || ''),
+        csvCell(r.classificacao_nivel || '')
       ]);
 
       const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
@@ -474,13 +461,13 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
 
       const headers = ['Setor', 'Total Empresas', 'Media Maturidade (%)', 'Estagio Predominante', 'Ferramenta Mais Usada', 'Obstaculo Principal', 'Observacoes'];
       const rows = dataToExport.map(r => [
-        `"${r.setor || ''}"`,
-        `"${r.total_empresas || 0}"`,
-        `"${r.media_maturidade || 0}%"`,
-        `"${r.estagio_predominante || ''}"`,
-        `"${r.ferramenta_mais_usada || ''}"`,
-        `"${r.obstaculo_principal || ''}"`,
-        `"${(r.observacoes || '').replace(/"/g, '""')}"`
+        csvCell(r.setor || ''),
+        csvCell(r.total_empresas || 0),
+        csvCell(`${r.media_maturidade || 0}%`),
+        csvCell(r.estagio_predominante || ''),
+        csvCell(r.ferramenta_mais_usada || ''),
+        csvCell(r.obstaculo_principal || ''),
+        csvCell(r.observacoes || '')
       ]);
 
       const csvContent = '\uFEFF' + [headers.join(';'), ...rows.map(e => e.join(';'))].join('\n');
@@ -495,8 +482,9 @@ export const ReportsView: React.FC<ReportsViewProps> = ({ onClose, isModal = fal
     }
   };
 
-  const sqlViewCodeSnippet = `-- Script de Criação de VIEW no Supabase
-CREATE OR REPLACE VIEW vw_relatorio_diagnostico_ia AS
+  const sqlViewCodeSnippet = `-- Script de Criação de VIEW no Supabase (security_invoker = true)
+CREATE OR REPLACE VIEW public.vw_relatorio_diagnostico_ia
+WITH (security_invoker = true) AS
 SELECT 
     COALESCE(NULLIF(TRIM(setor), ''), 'Serviços Gerais / Outros') AS setor,
     COUNT(*)::INTEGER AS total_empresas,
@@ -511,11 +499,14 @@ SELECT
     MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(TRIM(ferramentas), ''), 'ChatGPT / LLMs')) AS ferramenta_mais_usada,
     MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(TRIM(obstaculo), ''), 'Falta de Tempo')) AS obstaculo_principal,
     MODE() WITHIN GROUP (ORDER BY COALESCE(NULLIF(TRIM(objetivo), ''), 'Aumentar Produtividade')) AS observacoes
-FROM diagnostico_ia
-GROUP BY COALESCE(NULLIF(TRIM(setor), ''), 'Serviços Gerais / Outros');`;
+FROM public.diagnostico_ia
+GROUP BY COALESCE(NULLIF(TRIM(setor), ''), 'Serviços Gerais / Outros');
+
+REVOKE ALL ON public.vw_relatorio_diagnostico_ia FROM PUBLIC, anon;
+GRANT SELECT ON public.vw_relatorio_diagnostico_ia TO authenticated;`;
 
   const sqlTableCodeSnippet = `-- Script de Criação da TABELA FÍSICA no Supabase
-CREATE TABLE IF NOT EXISTS relatorio_diagnostico_ia (
+CREATE TABLE IF NOT EXISTS public.relatorio_diagnostico_ia (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     created_at TIMESTAMPTZ DEFAULT now(),
     setor VARCHAR(255),
@@ -525,7 +516,17 @@ CREATE TABLE IF NOT EXISTS relatorio_diagnostico_ia (
     ferramenta_mais_usada VARCHAR(255),
     obstaculo_principal VARCHAR(255),
     observacoes TEXT
-);`;
+);
+
+ALTER TABLE public.relatorio_diagnostico_ia ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS relatorio_diagnostico_ia_authenticated_select ON public.relatorio_diagnostico_ia;
+CREATE POLICY relatorio_diagnostico_ia_authenticated_select
+  ON public.relatorio_diagnostico_ia
+  FOR SELECT
+  TO authenticated
+  USING (true);
+REVOKE ALL ON public.relatorio_diagnostico_ia FROM PUBLIC, anon;
+GRANT SELECT ON public.relatorio_diagnostico_ia TO authenticated;`;
 
   const copySql = (textToCopy?: string) => {
     const text = textToCopy || sqlViewCodeSnippet;

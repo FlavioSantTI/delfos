@@ -1,97 +1,113 @@
-# DelfosIA — Diagnóstico, predição e acompanhamento de maturidade
+# DelfosIA 1.0 — Diagnóstico, predição e acompanhamento de maturidade
 > **by Flávio Santiago ConsultorIA**
 
-O **DelfosIA** é uma plataforma moderna e interativa de diagnóstico de maturidade empresarial em Inteligência Artificial. A ferramenta avalia o nível atual da organização (Iniciante, Exploratório, Estruturado ou Avançado) através de um fluxo estruturado em etapas, gerando recomendações práticas, direcionamento de investimentos e plano de ação imediato para automação e governança.
+O **DelfosIA** é uma plataforma de diagnóstico de maturidade empresarial em Inteligência Artificial. Avalia o nível da organização (Iniciante, Exploratório, Estruturado ou Avançado) em um fluxo em etapas e gera recomendações práticas, direcionamento de investimentos e plano de ação.
+
+**Versão:** 1.0.0  
+**Repositório:** [github.com/FlavioSantTI/delfos](https://github.com/FlavioSantTI/delfos)
 
 ---
 
-## 🚀 Principais Funcionalidades
+## Principais funcionalidades
 
-- **Diagnóstico em 3 Etapas Estruturadas:**
-  1. **Informações de Contato e Perfil:** Identificação da empresa, porte, setor e canal de comunicação direto (WhatsApp/E-mail).
-  2. **Maturidade e Tecnologias:** Nível de adoção de IA, ferramentas utilizadas (ChatGPT, Copilot, APIs, Claude, etc.) e áreas estratégicas de aplicação.
-  3. **Objetivos e Desafios:** Principais gargalos, processos prioritários para automação e objetivos de negócio.
+- **Diagnóstico em 3 etapas**
+  1. **Contato e perfil:** empresa, porte, setor e canal (WhatsApp/e-mail), com consentimento LGPD.
+  2. **Maturidade e tecnologias:** estágio de IA, ferramentas e áreas de aplicação.
+  3. **Objetivos e desafios:** gargalos, processos a automatizar e objetivos de negócio.
 
-- **Painel Administrativo & Relatórios:**
-  - Visualização de diagnósticos recebidos em tempo real.
-  - Métricas de maturidade por setor e distribuição de níveis.
-  - Filtros dinâmicos e busca por empresa/responsável.
-  - Exportação de dados e visualização detalhada de respostas.
+- **Painel administrativo**
+  - Login com sessão no servidor (cookie httpOnly + CSRF). Sem senha padrão no código.
+  - Relatórios e exclusões somente via API autenticada (`/api/reports*`).
+  - Métricas de maturidade, filtros e exportação CSV.
 
-- **Múltiplas Integrações de Persistência:**
-  - **Supabase (PostgreSQL Cloud):** Gravação estruturada na tabela `diagnostico_ia`.
-  - **PostgreSQL Direto / API REST:** Conexão com banco relacional e endpoints de sincronização.
-  - **n8n / Webhooks:** Disparo automático de fluxos de automação, alertas e relatórios personalizados via WhatsApp/Email.
+- **Persistência**
+  - Envio do diagnóstico pelo servidor (`POST /api/diagnostico`) para a tabela `diagnostico_ia` no Supabase.
+  - RLS no Postgres: `anon` só INSERT; leitura/exclusão no painel pelo backend com `service_role`.
 
-- **Exportação de Widget / HTML:**
-  - Modal integrado para gerar o código HTML/iframe para incorporação em qualquer site externo, landing page ou portal WordPress.
+- **Widget HTML**
+  - Modal para gerar código de incorporação (iframe) em site ou landing page, sem embutir chaves.
 
 ---
 
-## 🛠️ Stack Tecnológica
+## Stack
 
-- **Frontend:** [React 19](https://react.dev/), [TypeScript](https://www.typescriptlang.org/), [Tailwind CSS v4](https://tailwindcss.com/)
-- **Animações:** [Motion](https://motion.dev/)
-- **Ícones:** [Lucide React](https://lucide.dev/)
-- **Backend / Servidor:** [Node.js](https://nodejs.org/), [Express](https://expressjs.com/), [tsx](https://github.com/privatenumber/tsx), [esbuild](https://esbuild.github.io/)
-- **Banco de Dados & Integrações:** [@supabase/supabase-js](https://supabase.com/), `pg` (PostgreSQL Client)
+- **Frontend:** React 19, TypeScript, Tailwind CSS v4, Motion, Lucide
+- **Servidor:** Node.js, Express, tsx (dev), esbuild (build)
+- **Dados:** Supabase (Postgres) e, opcionalmente, `pg`
 
 ---
 
-## 📦 Estrutura do Projeto
+## Estrutura do projeto
 
 ```text
 ├── src/
-│   ├── components/         # Componentes do Formulário, Admin e UI
-│   │   ├── Header.tsx      # Cabeçalho da aplicação DelfosIA
-│   │   ├── Hero.tsx        # Apresentação do diagnóstico
-│   │   ├── Step1Contact.tsx# Etapa 1: Dados de contato e perfil
-│   │   ├── Step2Diagnosis.tsx # Etapa 2: Diagnóstico de maturidade
-│   │   ├── Step3Goals.tsx  # Etapa 3: Objetivos e gargalos
-│   │   ├── SuccessCard.tsx # Tela de confirmação e protocolo
-│   │   ├── ReportsView.tsx # Painel de relatórios administrativos
-│   │   ├── IntegrationModal.tsx # Configuração e testes de integrações
-│   │   └── HtmlExportModal.tsx  # Exportação de código embed
+│   ├── components/          # Formulário, admin e UI
 │   ├── lib/
-│   │   └── supabase.ts     # Cliente e operações do Supabase
-│   ├── types.ts            # Interfaces TypeScript do projeto
-│   ├── App.tsx             # Componente raiz e controle de rotas/fluxos
-│   └── main.tsx            # Ponto de entrada do React
-├── server.ts               # Servidor Express com rotas de API e Vite
-├── schema.sql              # Estrutura SQL da tabela no Supabase / Postgres
-├── package.json
-└── vite.config.ts
+│   │   ├── adminApi.ts      # Fetch same-origin com CSRF
+│   │   └── supabase.ts      # Tipos dos registros
+│   ├── App.tsx
+│   └── main.tsx
+├── adminSession.ts          # Cookie HMAC + CSRF + senha admin
+├── rateLimit.ts             # Limite de requisições (arquivo local)
+├── server.ts                # Express + Vite + APIs
+├── schema.sql               # Bootstrap do banco (projeto novo)
+├── migrations/
+│   └── enable_rls.sql       # RLS + view (projeto já existente)
+├── .env.example
+└── package.json
 ```
 
 ---
 
-## ⚙️ Instalação e Execução Local
+## Instalação e execução local
 
 ### 1. Pré-requisitos
-- [Node.js](https://nodejs.org/) (versão 18 ou superior)
-- Gerenciador de pacotes `npm` ou `pnpm`
 
-### 2. Clonar e Instalar Dependências
+- Node.js 18 ou superior
+- npm
+
+### 2. Clonar e instalar
+
 ```bash
-git clone <URL_DO_REPOSITORIO>
-cd delfos-ia
+git clone https://github.com/FlavioSantTI/delfos.git
+cd delfos
 npm install
 ```
 
-### 3. Configurar Variáveis de Ambiente
-Crie um arquivo `.env` baseado no `.env.example`:
-```env
-VITE_SUPABASE_URL="https://seu-projeto.supabase.co"
-VITE_SUPABASE_ANON_KEY="sua-chave-anonima-supabase"
+### 3. Variáveis de ambiente
+
+Copie `.env.example` para `.env` (o `.env` **não** entra no git):
+
+```bash
+cp .env.example .env
 ```
 
-### 4. Executar em Modo de Desenvolvimento
+Preencha no Dashboard do Supabase e no `.env`:
+
+| Variável | Onde obter | Uso |
+|---|---|---|
+| `SUPABASE_URL` | Project Settings → API | URL do projeto |
+| `SUPABASE_ANON_KEY` | API Keys → **publishable** / `anon` (`sb_publishable_...`) | INSERT público via RLS |
+| `SUPABASE_SERVICE_ROLE_KEY` | API Keys → **secret** / `service_role` (`sb_secret_...`) | Só no servidor (relatórios) |
+| `ADMIN_PASSWORD` | Você define (≥12 caracteres) | Login do painel |
+| `SESSION_SECRET` | String aleatória (≥16; ex. `openssl rand -hex 32`) | Assina o cookie de sessão |
+
+`HOST` padrão: `127.0.0.1`. `PORT` padrão: `3000`.
+
+Nunca coloque `service_role` em `VITE_*` / `NEXT_PUBLIC_*`. Sem `SUPABASE_SERVICE_ROLE_KEY`, as APIs de relatório respondem **503**. Sem `ADMIN_PASSWORD` / `SESSION_SECRET`, o login admin não funciona.
+
+Reinicie o Node depois de alterar o `.env` (`Ctrl+C` e `npm run dev` de novo).
+
+### 4. Desenvolvimento
+
 ```bash
 npm run dev
 ```
-Acesse a aplicação no navegador em `http://localhost:3000`.
 
-### 5. Build de Produção
+Abra [http://127.0.0.1:3000](http://127.0.0.1:3000).
+
+### 5. Produção
+
 ```bash
 npm run build
 npm start
@@ -99,34 +115,34 @@ npm start
 
 ---
 
-## 🗄️ Estrutura do Banco de Dados (Supabase)
+## Banco de dados (Supabase)
 
-Para criar a tabela no Supabase ou PostgreSQL, execute o script disponível em `schema.sql`:
+**Projeto novo:** rode `schema.sql` no SQL Editor.
 
-```sql
-CREATE TABLE IF NOT EXISTS diagnostico_ia (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    nome VARCHAR(255) NOT NULL,
-    whatsapp VARCHAR(50) NOT NULL,
-    email VARCHAR(255),
-    empresa VARCHAR(255) NOT NULL,
-    setor VARCHAR(100),
-    porte VARCHAR(50),
-    estagio_ia VARCHAR(100),
-    ferramentas TEXT[],
-    areas_aplicacao TEXT[],
-    obstaculo TEXT,
-    objetivo TEXT,
-    processo_especifico TEXT,
-    classificacao_nivel VARCHAR(50),
-    status_processamento VARCHAR(50) DEFAULT 'pendente'
-);
-```
+**Projeto que já tem dados:** rode **somente** `migrations/enable_rls.sql` (idempotente). Não rode `schema.sql` em produção com dados — ele é bootstrap.
+
+O script de RLS:
+
+- liga RLS em `diagnostico_ia` e `relatorio_diagnostico_ia`
+- recria `vw_relatorio_diagnostico_ia` com `security_invoker = true`
+- adiciona colunas LGPD se ainda não existirem
+
+Se o `CREATE OR REPLACE VIEW` falhar ao renomear colunas, o script atual já faz `DROP VIEW` + `CREATE VIEW`.
 
 ---
 
-## 👤 Créditos & Autoria
+## Scripts
 
-Desenvolvido por **Flávio Santiago ConsultorIA**.
+| Comando | Função |
+|---|---|
+| `npm run dev` | Servidor de desenvolvimento (`tsx server.ts`) |
+| `npm run build` | Build Vite + bundle do servidor |
+| `npm start` | Sobe `dist/server.cjs` |
+| `npm run lint` | `tsc --noEmit` |
+
+---
+
+## Créditos
+
+Desenvolvido por **Flávio Santiago ConsultorIA**.  
 Todos os direitos reservados.

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from './components/Header';
 import { Hero } from './components/Hero';
 import { LandingPage } from './components/LandingPage';
@@ -14,14 +14,14 @@ import { ReportsView } from './components/ReportsView';
 import { ArrowLeft } from 'lucide-react';
 import { FormData, IntegrationConfig, SubmissionResult } from './types';
 import { calculateMaturityScore, isValidEmail, isValidPhone } from './utils/mask';
-import { saveDiagnosticoToSupabase } from './lib/supabase';
+import { checkAdminSession, logoutAdmin } from './lib/adminApi';
 
 const DEFAULT_CONFIG: IntegrationConfig = {
-  postgresDbUrl: 'postgresql://questionario:Favuca%401970@PostGres:5432/DB_Automacoes',
-  supabaseUrl: 'https://rbcghgztrbggtonvorsr.supabase.co',
-  supabaseAnonKey: 'sb_publishable_VpSgH8HokATbjmALM54WWw_cgN7m4c8',
+  postgresDbUrl: '',
+  supabaseUrl: '',
+  supabaseAnonKey: '',
   supabaseTable: 'diagnostico_ia',
-  n8nWebhookUrl: 'https://n8n.suaempresa.com/webhook/diagnostico-ia'
+  n8nWebhookUrl: ''
 };
 
 const INITIAL_FORM_DATA: FormData = {
@@ -38,28 +38,25 @@ const INITIAL_FORM_DATA: FormData = {
   obstaculo: '',
   objetivo: '',
   processo: '',
-  lgpdConsent: true
+  lgpdConsent: false
 };
 
 export default function App() {
-  // Check if session is already authenticated for admin
-  const isSessionAdmin = typeof window !== 'undefined' && sessionStorage.getItem('admin_authenticated') === 'true';
-
-  const checkInitialAdminMode = () => {
+  const wantsAdminFromUrl = () => {
     if (typeof window === 'undefined') return false;
     const search = window.location.search.toLowerCase();
     const hash = window.location.hash.toLowerCase();
     const pathname = window.location.pathname.toLowerCase();
     return (
-      (search.includes('admin') || search.includes('relatorio') || hash.includes('admin') || pathname.startsWith('/admin')) &&
-      isSessionAdmin
+      search.includes('admin') ||
+      search.includes('relatorio') ||
+      hash.includes('admin') ||
+      pathname.startsWith('/admin')
     );
   };
 
-  const [isAdminMode, setIsAdminMode] = useState<boolean>(checkInitialAdminMode);
-  const [currentTab, setCurrentTab] = useState<'diagnostico' | 'relatorio'>(
-    checkInitialAdminMode() ? 'relatorio' : 'diagnostico'
-  );
+  const [isAdminMode, setIsAdminMode] = useState<boolean>(false);
+  const [currentTab, setCurrentTab] = useState<'diagnostico' | 'relatorio'>('diagnostico');
   const [viewMode, setViewMode] = useState<'landing' | 'wizard'>('landing');
   const [currentStep, setCurrentStep] = useState<number>(1);
   const [formData, setFormData] = useState<FormData>(INITIAL_FORM_DATA);
@@ -74,21 +71,37 @@ export default function App() {
   const [isHtmlModalOpen, setIsHtmlModalOpen] = useState<boolean>(false);
 
   // Toggle or Request Admin Mode with Authentication Gate
-  const handleRequestAdminMode = (enableAdmin: boolean) => {
+  const handleRequestAdminMode = async (enableAdmin: boolean) => {
     if (!enableAdmin) {
+      await logoutAdmin();
       setIsAdminMode(false);
       setCurrentTab('diagnostico');
       return;
     }
 
-    const authenticated = sessionStorage.getItem('admin_authenticated') === 'true';
-    if (authenticated) {
+    const ok = await checkAdminSession();
+    if (ok) {
       setIsAdminMode(true);
       setCurrentTab('relatorio');
     } else {
       setIsAdminAuthModalOpen(true);
     }
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await checkAdminSession();
+      if (cancelled) return;
+      if (ok && wantsAdminFromUrl()) {
+        setIsAdminMode(true);
+        setCurrentTab('relatorio');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleAdminAuthSuccess = () => {
     setIsAdminAuthModalOpen(false);
@@ -116,30 +129,17 @@ export default function App() {
   };
 
   // Config State
-  const [config, setConfig] = useState<IntegrationConfig>(() => {
-    try {
-      const saved = localStorage.getItem('empretec_ai_config');
-      return saved ? JSON.parse(saved) : DEFAULT_CONFIG;
-    } catch {
-      return DEFAULT_CONFIG;
-    }
-  });
+  const [config, setConfig] = useState<IntegrationConfig>(DEFAULT_CONFIG);
 
   const handleSaveConfig = (newConfig: IntegrationConfig) => {
-    setConfig(newConfig);
-    try {
-      localStorage.setItem('empretec_ai_config', JSON.stringify(newConfig));
-    } catch {
-      // ignore
-    }
+    setConfig({
+      ...newConfig,
+      postgresDbUrl: '',
+      supabaseAnonKey: '',
+    });
   };
 
-  const isConfigured = Boolean(
-    config.supabaseUrl &&
-    !config.supabaseUrl.includes('sua-url-supabase') &&
-    config.supabaseAnonKey &&
-    !config.supabaseAnonKey.includes('sua-anon-key')
-  );
+  const isConfigured = true;
 
   const handleFieldChange = (field: keyof FormData, value: any) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -228,21 +228,42 @@ export default function App() {
     const submissionId = `DIAG-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
     try {
-      const serverRes = await saveDiagnosticoToSupabase(formData, score, config.supabaseUrl, config.supabaseAnonKey);
-
-      const resolvedId = serverRes.data?.id || submissionId;
+      const serverRes = await fetch('/api/diagnostico', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          nome: formData.nome,
+          whatsapp: formData.whatsapp,
+          email: formData.email,
+          empresa: formData.empresa,
+          setor: formData.setor,
+          porte: formData.porte,
+          estagio: formData.estagio,
+          estagio_nivel: formData.estagioNivel,
+          ferramentas: formData.ferramentas,
+          areas: formData.areas,
+          obstaculo: formData.obstaculo,
+          objetivo: formData.objetivo,
+          processo: formData.processo,
+          score,
+          lgpdConsent: formData.lgpdConsent === true,
+        }),
+      });
+      const payload = await serverRes.json().catch(() => ({}));
+      const ok = serverRes.ok && payload.success;
+      const resolvedId = payload.id || submissionId;
 
       setSubmissionResult({
         id: resolvedId,
         score: score,
         data: { ...formData },
         timestamp: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-        postgresSuccess: serverRes.success,
-        supabaseSuccess: serverRes.success,
-        n8nSuccess: true,
-        mensagem: serverRes.success 
-          ? 'Diagnóstico processado com sucesso e salvo com segurança!' 
-          : (serverRes.error ? `Processado localmente (${serverRes.error})` : 'Diagnóstico processado localmente.')
+        postgresSuccess: ok,
+        supabaseSuccess: ok,
+        n8nSuccess: false,
+        mensagem: ok
+          ? 'Diagnóstico processado com sucesso e salvo com segurança!'
+          : (payload.error || 'Não foi possível gravar o diagnóstico. Tente novamente.')
       });
 
     } catch (error: any) {
@@ -445,7 +466,6 @@ export default function App() {
       <HtmlExportModal
         isOpen={isHtmlModalOpen}
         onClose={() => setIsHtmlModalOpen(false)}
-        config={config}
       />
 
     </div>

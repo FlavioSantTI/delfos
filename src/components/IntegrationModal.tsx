@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { X, Database, Workflow, Key, Copy, Check, Shield, Server, Terminal } from 'lucide-react';
 import { IntegrationConfig } from '../types';
+import { adminFetch } from '../lib/adminApi';
 
 interface IntegrationModalProps {
   isOpen: boolean;
@@ -23,7 +24,7 @@ export const IntegrationModal: React.FC<IntegrationModalProps> = ({
   const [activeTab, setActiveTab] = useState<'credentials' | 'sql' | 'n8n'>('credentials');
   const [testDbStatus, setTestDbStatus] = useState<{ loading: boolean; message?: string; success?: boolean }>({ loading: false });
 
-  const sqlSnippet = `-- Script SQL para criar a tabela e permissões no Supabase (SQL Editor)
+  const sqlSnippet = `-- Tabela + RLS (anon só INSERT; leitura/exclusão via API autenticada / service_role)
 CREATE TABLE IF NOT EXISTS public.diagnostico_ia (
   id UUID NOT NULL DEFAULT gen_random_uuid(),
   created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT timezone('utc'::text, now()),
@@ -41,16 +42,37 @@ CREATE TABLE IF NOT EXISTS public.diagnostico_ia (
   processo_especifico TEXT NULL,
   classificacao_nivel TEXT NULL,
   status_processamento TEXT NULL DEFAULT 'pending'::text,
+  lgpd_consent_at TIMESTAMPTZ NULL,
+  lgpd_term_version TEXT NULL,
   CONSTRAINT diagnostico_ia_pkey PRIMARY KEY (id)
 );
 
--- IMPORTANTE: DESABILITAR RLS PARA PERMITIR GRAVAÇÃO PÚBLICA (ANON):
-ALTER TABLE public.diagnostico_ia DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.diagnostico_ia ENABLE ROW LEVEL SECURITY;
 
--- OU CASO PREFIRA MANTER RLS ATIVO, CRIE AS POLÍTICAS DE ACESSO:
--- CREATE POLICY "Permitir Inserção Pública" ON public.diagnostico_ia FOR INSERT TO anon, authenticated WITH CHECK (true);
--- CREATE POLICY "Permitir Leitura Pública" ON public.diagnostico_ia FOR SELECT TO anon, authenticated USING (true);
--- CREATE POLICY "Permitir Exclusão Pública" ON public.diagnostico_ia FOR DELETE TO anon, authenticated USING (true);`;
+DROP POLICY IF EXISTS diagnostico_ia_anon_insert ON public.diagnostico_ia;
+CREATE POLICY diagnostico_ia_anon_insert
+  ON public.diagnostico_ia
+  FOR INSERT
+  TO anon
+  WITH CHECK (true);
+
+DROP POLICY IF EXISTS diagnostico_ia_authenticated_select ON public.diagnostico_ia;
+CREATE POLICY diagnostico_ia_authenticated_select
+  ON public.diagnostico_ia
+  FOR SELECT
+  TO authenticated
+  USING (true);
+
+DROP POLICY IF EXISTS diagnostico_ia_authenticated_delete ON public.diagnostico_ia;
+CREATE POLICY diagnostico_ia_authenticated_delete
+  ON public.diagnostico_ia
+  FOR DELETE
+  TO authenticated
+  USING (true);
+
+REVOKE ALL ON public.diagnostico_ia FROM PUBLIC;
+GRANT INSERT ON public.diagnostico_ia TO anon;
+GRANT SELECT, DELETE ON public.diagnostico_ia TO authenticated;`;
 
   const n8nPayloadExample = `{
   "id": "a3b8c2d1-9e4f-4a01-9b1c-3d2e1f0a",
@@ -74,13 +96,10 @@ ALTER TABLE public.diagnostico_ia DISABLE ROW LEVEL SECURITY;
   const handleTestPostgres = async () => {
     setTestDbStatus({ loading: true });
     try {
-      const res = await fetch('/api/test-db', {
+      const res = await adminFetch('/api/test-db', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          supabaseUrl: formConfig.supabaseUrl,
-          supabaseKey: formConfig.supabaseAnonKey
-        })
+        body: JSON.stringify({}),
       });
       const data = await res.json();
       if (res.ok && data.success) {
@@ -193,7 +212,7 @@ ALTER TABLE public.diagnostico_ia DISABLE ROW LEVEL SECURITY;
                     type="text"
                     value={formConfig.postgresDbUrl || ''}
                     onChange={(e) => setFormConfig({ ...formConfig, postgresDbUrl: e.target.value })}
-                    placeholder="postgresql://questionario:Favuca%401970@PostGres:5432/DB_Automacoes"
+                    placeholder="Definida só no servidor (DATABASE_URL)"
                     className="flex-1 px-3.5 py-2 rounded-xl border border-slate-300 font-mono text-xs focus:border-indigo-600 outline-none bg-white"
                   />
                   <button

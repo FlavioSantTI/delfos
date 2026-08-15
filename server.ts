@@ -1,72 +1,50 @@
 import express from 'express';
 import path from 'path';
-import pg from 'pg';
 import dotenv from 'dotenv';
+import {
+  adminPasswordMatches,
+  clearSessionCookies,
+  createAdminSession,
+  isAdminPasswordConfigured,
+  requireAdminSession,
+  setSessionCookies,
+} from './adminSession.ts';
+import { createRateLimiter } from './rateLimit.ts';
 
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
+const HOST = process.env.HOST || '127.0.0.1';
+const IS_PROD = process.env.NODE_ENV === 'production';
+const LGPD_TERM_VERSION = '2026-08-14';
 
-// Security Headers Middleware (Safe for iframe previews)
 app.use((req, res, next) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
-  res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader(
+    'Content-Security-Policy',
+    IS_PROD
+      ? "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'self'; base-uri 'self'; form-action 'self'"
+      : "frame-ancestors 'self'"
+  );
+  const proto = String(req.headers['x-forwarded-proto'] || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  if (IS_PROD && (req.secure || proto === 'https')) {
+    res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  }
   next();
 });
 
 app.use(express.json({ limit: '1mb' }));
 
-// In-Memory Rate Limiting for DDoS & Abuse Protection
-interface RateLimitEntry {
-  count: number;
-  resetTime: number;
-}
-const rateLimitMap = new Map<string, RateLimitEntry>();
-
-// Clean up expired rate limit entries every 10 minutes
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, entry] of rateLimitMap.entries()) {
-    if (now > entry.resetTime) {
-      rateLimitMap.delete(key);
-    }
-  }
-}, 10 * 60 * 1000);
-
-function createRateLimiter(maxRequests: number, windowMs: number, customMessage?: string) {
-  return (req: express.Request, res: express.Response, next: express.NextFunction) => {
-    const rawIp = req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
-    const ip = Array.isArray(rawIp) ? rawIp[0] : String(rawIp).split(',')[0].trim();
-    const key = `${req.path}_${ip}`;
-    const now = Date.now();
-    const entry = rateLimitMap.get(key);
-
-    if (!entry || now > entry.resetTime) {
-      rateLimitMap.set(key, { count: 1, resetTime: now + windowMs });
-      return next();
-    }
-
-    if (entry.count >= maxRequests) {
-      return res.status(429).json({
-        success: false,
-        error: customMessage || 'Muitas requisições originadas deste IP. Aguarde alguns instantes antes de tentar novamente.'
-      });
-    }
-
-    entry.count++;
-    next();
-  };
-}
-
-// Security & Data Sanitization Helpers
 function sanitizeString(str: any, maxLength: number = 300): string {
   if (typeof str !== 'string') return '';
-  return str
-    .trim()
-    .replace(/[<>]/g, '') // Strip basic HTML tags
-    .slice(0, maxLength);
+  return str.replace(/\0/g, '').trim().slice(0, maxLength);
 }
 
 function isValidServerEmail(email: string): boolean {
@@ -88,131 +66,132 @@ function isValidIdParam(id: string): boolean {
   return uuidRegex.test(id) || diagIdRegex.test(id);
 }
 
-// Helper for PostgreSQL pool lazy initialization
-let dbPool: pg.Pool | null = null;
-let currentDbUrl: string = process.env.DATABASE_URL || 'postgresql://questionario:Favuca%401970@PostGres:5432/DB_Automacoes';
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+const SUPABASE_ANON_KEY =
+  process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 
-function getPool(customUrl?: string): pg.Pool {
-  const urlToUse = customUrl || process.env.DATABASE_URL || currentDbUrl;
-  
-  if (!dbPool || (customUrl && customUrl !== currentDbUrl)) {
-    if (dbPool) {
-      dbPool.end().catch(() => {});
-    }
-    currentDbUrl = urlToUse;
-    dbPool = new pg.Pool({
-      connectionString: urlToUse,
-      connectionTimeoutMillis: 5000,
-    });
+function supabaseAnonHeaders(): Record<string, string> | null {
+  if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  return {
+    apikey: SUPABASE_ANON_KEY,
+    Authorization: `Bearer ${SUPABASE_ANON_KEY}`,
+  };
+}
+
+function supabaseAdminHeaders(): Record<string, string> | null {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) return null;
+  return {
+    apikey: SUPABASE_SERVICE_ROLE_KEY,
+    Authorization: `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`,
+  };
+}
+
+function requireSupabaseAdmin(res: express.Response): Record<string, string> | null {
+  const headers = supabaseAdminHeaders();
+  if (!headers) {
+    res.status(503).json({ success: false, error: 'Serviço temporariamente indisponível.' });
+    return null;
   }
-  return dbPool;
+  return headers;
 }
-
-// Ensure database table exists
-async function ensureTableExists(pool: pg.Pool) {
-  const createTableQuery = `
-    CREATE TABLE IF NOT EXISTS diagnostico_ia (
-        id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-        created_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
-        nome TEXT NOT NULL,
-        whatsapp TEXT NOT NULL,
-        email TEXT NOT NULL,
-        empresa TEXT NOT NULL,
-        setor TEXT,
-        porte TEXT,
-        estagio_ia TEXT NOT NULL,
-        ferramentas TEXT,
-        areas_aplicacao TEXT,
-        obstaculo TEXT,
-        objetivo TEXT,
-        processo_especifico TEXT,
-        classificacao_nivel TEXT,
-        status_processamento TEXT DEFAULT 'pending'
-    );
-  `;
-  await pool.query(createTableQuery);
-}
-
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://rbcghgztrbggtonvorsr.supabase.co';
-const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || 'sb_publishable_VpSgH8HokATbjmALM54WWw_cgN7m4c8';
-
-// Health & DB Connection Status Check
-// Admin Authentication Endpoint (Rate limited: 10 attempts / 15 mins)
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 app.post('/api/admin/auth', createRateLimiter(10, 15 * 60 * 1000, 'Muitas tentativas de login. Aguarde 15 minutos.'), (req, res) => {
+  if (!isAdminPasswordConfigured()) {
+    return res.status(503).json({
+      success: false,
+      error: 'Login administrativo não configurado no servidor.',
+    });
+  }
+
   const { password } = req.body;
-  if (!password) {
+  if (!password || typeof password !== 'string') {
     return res.status(400).json({ success: false, error: 'Senha não fornecida.' });
   }
 
-  if (password === ADMIN_PASSWORD || password === 'flaviosantiago') {
-    return res.json({
-      success: true,
-      token: 'admin_session_' + Date.now(),
-      message: 'Autenticação bem-sucedida.'
+  if (!adminPasswordMatches(password)) {
+    return res.status(401).json({
+      success: false,
+      error: 'Senha incorreta. Acesso não autorizado.',
     });
   }
 
-  return res.status(401).json({
-    success: false,
-    error: 'Senha incorreta. Acesso não autorizado.'
+  const session = createAdminSession();
+  setSessionCookies(req, res, session);
+  return res.json({
+    success: true,
+    csrfToken: session.csrf,
+    message: 'Autenticação bem-sucedida.',
   });
 });
 
-app.get('/api/health', async (req, res) => {
-  try {
-    const supabaseCheck = await fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia?select=count`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
-    });
+app.get('/api/admin/session', requireAdminSession, (_req, res) => {
+  res.json({ success: true, authenticated: true });
+});
 
-    res.json({
-      status: 'ok',
-      supabase: supabaseCheck.ok ? 'connected' : 'error',
-      supabase_url: SUPABASE_URL
+app.post('/api/admin/logout', (req, res) => {
+  clearSessionCookies(req, res);
+  res.json({ success: true });
+});
+
+app.get('/api/health', async (_req, res) => {
+  const headers = supabaseAnonHeaders();
+  if (!headers || !SUPABASE_URL) {
+    return res.json({ status: 'ok' });
+  }
+  try {
+    const supabaseCheck = await fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia?select=id&limit=1`, {
+      headers,
     });
-  } catch (error: any) {
     res.json({
-      status: 'warning',
-      supabase: 'disconnected',
-      error: error.message || 'Não foi possível conectar ao Supabase.'
+      status: supabaseCheck.ok ? 'ok' : 'degraded',
     });
+  } catch (error) {
+    console.error('Health check failed:', error);
+    res.json({ status: 'degraded' });
   }
 });
 
-// Test Supabase / PostgreSQL Connection directly (Rate limited: 15 req/min)
-app.post('/api/test-db', createRateLimiter(15, 60 * 1000, 'Limite de testes de conexão atingido. Tente em 1 minuto.'), async (req, res) => {
-  const { supabaseUrl, supabaseKey } = req.body;
-  const urlToTest = sanitizeString(supabaseUrl) || SUPABASE_URL;
-  const keyToTest = sanitizeString(supabaseKey) || SUPABASE_KEY;
-
-  try {
-    const response = await fetch(`${urlToTest}/rest/v1/diagnostico_ia?select=id&limit=1`, {
-      headers: {
-        'apikey': keyToTest,
-        'Authorization': `Bearer ${keyToTest}`
-      }
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Supabase respondeu com status ${response.status}: ${errText}`);
+app.post(
+  '/api/test-db',
+  requireAdminSession,
+  createRateLimiter(15, 60 * 1000, 'Limite de testes de conexão atingido. Tente em 1 minuto.'),
+  async (_req, res) => {
+    const headers = supabaseAdminHeaders() || supabaseAnonHeaders();
+    if (!headers || !SUPABASE_URL) {
+      return res.status(503).json({
+        success: false,
+        error: 'Banco não configurado no servidor.',
+      });
     }
 
-    res.json({
-      success: true,
-      message: 'Conexão com Supabase realizada e tabela "diagnostico_ia" verificada com sucesso!'
-    });
-  } catch (error: any) {
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Falha ao conectar ao Supabase'
-    });
+    try {
+      const response = await fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia?select=id&limit=1`, {
+        headers,
+      });
+
+      if (!response.ok) {
+        const errText = await response.text();
+        console.error('test-db upstream:', response.status, errText);
+        return res.status(502).json({
+          success: false,
+          error: 'Falha ao conectar ao banco.',
+        });
+      }
+
+      res.json({
+        success: true,
+        message: 'Conexão com o banco verificada com sucesso.',
+      });
+    } catch (error) {
+      console.error('test-db failed:', error);
+      res.status(500).json({
+        success: false,
+        error: 'Falha ao conectar ao banco.',
+      });
+    }
   }
-});
+);
 
 // Save Diagnóstico Route with Rate Limiting (10 submissions per 15 min per IP) and Server-Side Validation
 app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de submissões excedido. Aguarde alguns minutos.'), async (req, res) => {
@@ -232,8 +211,7 @@ app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de su
       objetivo,
       processo,
       score,
-      customSupabaseUrl,
-      customSupabaseKey
+      lgpdConsent,
     } = req.body;
 
     // 1. Mandatory Field Validation
@@ -278,6 +256,13 @@ app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de su
       });
     }
 
+    if (lgpdConsent !== true) {
+      return res.status(400).json({
+        success: false,
+        error: 'É necessário concordar com os termos de privacidade para gerar o diagnóstico.',
+      });
+    }
+
     // 2. Format & Sanitize Optional Fields
     const ferramentasStr = Array.isArray(ferramentas) 
       ? ferramentas.map(f => sanitizeString(f, 60)).filter(Boolean).join(', ') 
@@ -297,8 +282,13 @@ app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de su
     const numNivel = Math.max(1, Math.min(5, Number(estagio_nivel) || 1));
     const classificacao = `Nível ${numNivel} (${numScore}%)`;
 
-    const targetUrl = sanitizeString(customSupabaseUrl) || SUPABASE_URL;
-    const targetKey = sanitizeString(customSupabaseKey) || SUPABASE_KEY;
+    const headers = supabaseAnonHeaders();
+    if (!headers || !SUPABASE_URL) {
+      return res.status(503).json({
+        success: false,
+        error: 'Serviço temporariamente indisponível.',
+      });
+    }
 
     const payload = {
       nome: cleanNome,
@@ -314,26 +304,43 @@ app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de su
       objetivo: cleanObjetivo || null,
       processo_especifico: cleanProcesso || null,
       classificacao_nivel: classificacao,
-      status_processamento: 'pending'
+      status_processamento: 'pending',
+      lgpd_consent_at: new Date().toISOString(),
+      lgpd_term_version: LGPD_TERM_VERSION,
     };
 
-    const spRes = await fetch(`${targetUrl}/rest/v1/diagnostico_ia`, {
-      method: 'POST',
-      headers: {
-        'apikey': targetKey,
-        'Authorization': `Bearer ${targetKey}`,
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-      },
-      body: JSON.stringify(payload)
-    });
+    const insert = (body: object) =>
+      fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia`, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+          Prefer: 'return=representation',
+        },
+        body: JSON.stringify(body),
+      });
+
+    let spRes = await insert(payload);
+    if (!spRes.ok) {
+      const errText = await spRes.text();
+      if (/lgpd_/i.test(errText)) {
+        const { lgpd_consent_at: _a, lgpd_term_version: _b, ...basePayload } = payload;
+        spRes = await insert(basePayload);
+      } else {
+        console.error('Erro ao salvar no Supabase REST API:', spRes.status, errText);
+        return res.status(502).json({
+          success: false,
+          error: 'Erro ao gravar o diagnóstico.',
+        });
+      }
+    }
 
     if (!spRes.ok) {
       const errText = await spRes.text();
-      console.error('Erro ao salvar no Supabase REST API:', errText);
-      return res.status(spRes.status).json({
+      console.error('Erro ao salvar no Supabase REST API:', spRes.status, errText);
+      return res.status(502).json({
         success: false,
-        error: `Erro ao gravar no Supabase (${spRes.status}): ${errText}`
+        error: 'Erro ao gravar o diagnóstico.',
       });
     }
 
@@ -344,34 +351,36 @@ app.post('/api/diagnostico', createRateLimiter(10, 15 * 60 * 1000, 'Limite de su
       success: true,
       id: row?.id,
       created_at: row?.created_at,
-      message: 'Diagnóstico validado e salvo com sucesso no Supabase!'
+      message: 'Diagnóstico validado e salvo com sucesso.'
     });
-  } catch (error: any) {
+  } catch (error) {
     console.error('Erro no servidor ao gravar no Supabase:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Erro ao gravar no banco de dados'
+      error: 'Erro ao gravar no banco de dados',
     });
   }
 });
 
+app.use('/api/reports', requireAdminSession);
+
 // Fetch View Relatório Diagnóstico IA (vw_relatorio_diagnostico_ia)
-app.get('/api/reports/view_relatorio', async (req, res) => {
+app.get('/api/reports/view_relatorio', async (_req, res) => {
+  const headers = requireSupabaseAdmin(res);
+  if (!headers) return;
   try {
     const spRes = await fetch(`${SUPABASE_URL}/rest/v1/vw_relatorio_diagnostico_ia?select=*&order=total_empresas.desc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers
     });
 
     if (!spRes.ok) {
       const errText = await spRes.text();
+      console.error('view_relatorio upstream:', spRes.status, errText);
       return res.json({
         success: false,
         tableExists: false,
         data: [],
-        error: `View 'vw_relatorio_diagnostico_ia' ainda não existe ou não tem permissão (${spRes.status}): ${errText}`
+        error: 'View indisponível.',
       });
     }
 
@@ -381,33 +390,34 @@ app.get('/api/reports/view_relatorio', async (req, res) => {
       tableExists: true,
       data: data || []
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('view_relatorio failed:', error);
     res.json({
       success: false,
       tableExists: false,
       data: [],
-      error: error.message || 'Erro ao buscar dados de vw_relatorio_diagnostico_ia'
+      error: 'Erro ao buscar dados da view.',
     });
   }
 });
 
 // Fetch Tabela Física Relatório Diagnóstico IA (relatorio_diagnostico_ia)
-app.get('/api/reports/tabela_relatorio', async (req, res) => {
+app.get('/api/reports/tabela_relatorio', async (_req, res) => {
+  const headers = requireSupabaseAdmin(res);
+  if (!headers) return;
   try {
     const spRes = await fetch(`${SUPABASE_URL}/rest/v1/relatorio_diagnostico_ia?select=*&order=created_at.desc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers
     });
 
     if (!spRes.ok) {
       const errText = await spRes.text();
+      console.error('tabela_relatorio upstream:', spRes.status, errText);
       return res.json({
         success: false,
         tableExists: false,
         data: [],
-        error: `Tabela 'relatorio_diagnostico_ia' ainda não existe ou não tem permissão (${spRes.status}): ${errText}`
+        error: 'Tabela indisponível.',
       });
     }
 
@@ -417,42 +427,40 @@ app.get('/api/reports/tabela_relatorio', async (req, res) => {
       tableExists: true,
       data: data || []
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('tabela_relatorio failed:', error);
     res.json({
       success: false,
       tableExists: false,
       data: [],
-      error: error.message || 'Erro ao buscar dados de relatorio_diagnostico_ia'
+      error: 'Erro ao buscar dados da tabela.',
     });
   }
 });
 
 // Fetch Relatório Diagnóstico IA (fallback)
-app.get('/api/reports/relatorio', async (req, res) => {
+app.get('/api/reports/relatorio', async (_req, res) => {
+  const headers = requireSupabaseAdmin(res);
+  if (!headers) return;
   try {
     let spRes = await fetch(`${SUPABASE_URL}/rest/v1/vw_relatorio_diagnostico_ia?select=*&order=total_empresas.desc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers
     });
 
     if (!spRes.ok) {
       spRes = await fetch(`${SUPABASE_URL}/rest/v1/relatorio_diagnostico_ia?select=*`, {
-        headers: {
-          'apikey': SUPABASE_KEY,
-          'Authorization': `Bearer ${SUPABASE_KEY}`
-        }
+        headers
       });
     }
 
     if (!spRes.ok) {
       const errText = await spRes.text();
+      console.error('relatorio upstream:', spRes.status, errText);
       return res.json({
         success: false,
         tableExists: false,
         data: [],
-        error: `Objeto não encontrado (${spRes.status}): ${errText}`
+        error: 'Relatório indisponível.',
       });
     }
 
@@ -462,31 +470,32 @@ app.get('/api/reports/relatorio', async (req, res) => {
       tableExists: true,
       data: data || []
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('relatorio failed:', error);
     res.json({
       success: false,
       tableExists: false,
       data: [],
-      error: error.message || 'Erro ao buscar relatórios'
+      error: 'Erro ao buscar relatórios',
     });
   }
 });
 
 // Fetch all Diagnósticos for Reports Page
-app.get('/api/reports', async (req, res) => {
+app.get('/api/reports', async (_req, res) => {
+  const headers = requireSupabaseAdmin(res);
+  if (!headers) return;
   try {
     const spRes = await fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia?select=*&order=created_at.desc`, {
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers
     });
 
     if (!spRes.ok) {
       const errText = await spRes.text();
-      return res.status(spRes.status).json({
+      console.error('reports upstream:', spRes.status, errText);
+      return res.status(502).json({
         success: false,
-        error: `Erro ao carregar relatórios do Supabase (${spRes.status}): ${errText}`
+        error: 'Erro ao carregar relatórios.',
       });
     }
 
@@ -495,10 +504,11 @@ app.get('/api/reports', async (req, res) => {
       success: true,
       data: data || []
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('reports failed:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Erro ao buscar dados de relatórios'
+      error: 'Erro ao buscar dados de relatórios',
     });
   }
 });
@@ -514,20 +524,21 @@ app.delete('/api/reports/:id', async (req, res) => {
     });
   }
 
+  const headers = requireSupabaseAdmin(res);
+  if (!headers) return;
+
   try {
     const spRes = await fetch(`${SUPABASE_URL}/rest/v1/diagnostico_ia?id=eq.${encodeURIComponent(id)}`, {
       method: 'DELETE',
-      headers: {
-        'apikey': SUPABASE_KEY,
-        'Authorization': `Bearer ${SUPABASE_KEY}`
-      }
+      headers
     });
 
     if (!spRes.ok) {
       const errText = await spRes.text();
-      return res.status(spRes.status).json({
+      console.error('delete upstream:', spRes.status, errText);
+      return res.status(502).json({
         success: false,
-        error: `Erro ao excluir registro no Supabase (${spRes.status}): ${errText}`
+        error: 'Erro ao excluir registro.',
       });
     }
 
@@ -535,10 +546,11 @@ app.delete('/api/reports/:id', async (req, res) => {
       success: true,
       message: 'Registro excluído com sucesso.'
     });
-  } catch (error: any) {
+  } catch (error) {
+    console.error('delete failed:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Erro ao excluir registro'
+      error: 'Erro ao excluir registro',
     });
   }
 });
@@ -560,8 +572,8 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server listening on http://0.0.0.0:${PORT}`);
+  app.listen(PORT, HOST, () => {
+    console.log(`Server listening on http://${HOST}:${PORT}`);
   });
 }
 

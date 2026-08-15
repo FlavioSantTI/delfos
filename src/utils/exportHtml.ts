@@ -1,11 +1,4 @@
-import { IntegrationConfig } from '../types';
-
-export function generateStandaloneHtml(config: IntegrationConfig): string {
-  const supabaseUrl = config.supabaseUrl || 'https://SUA_URL_SUPABASE.supabase.co';
-  const supabaseAnonKey = config.supabaseAnonKey || 'SUA_ANON_KEY_PUBLIC_SUPABASE';
-  const supabaseTable = config.supabaseTable || 'diagnostico_ia';
-  const n8nWebhook = config.n8nWebhookUrl || 'https://SEU_N8N_INSTANCIA.com/webhook/diagnostico-ia';
-
+export function generateStandaloneHtml(): string {
   return `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -342,6 +335,13 @@ export function generateStandaloneHtml(config: IntegrationConfig): string {
             <textarea id="processo" rows="3" placeholder="Exemplo: Atendimento inicial de leads no WhatsApp, geração de propostas comerciais..." class="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-100 outline-none transition text-sm"></textarea>
           </div>
 
+          <div>
+            <label class="flex items-start gap-2 text-xs text-slate-600">
+              <input type="checkbox" id="lgpdConsent" class="mt-0.5 rounded">
+              <span>Concordo com o tratamento dos dados para o diagnóstico, contato do consultor e automações (incluindo WhatsApp). Os dados não serão vendidos.</span>
+            </label>
+          </div>
+
           <div class="pt-4 flex items-center justify-between">
             <button type="button" onclick="nextStep(2)" class="text-slate-600 hover:text-slate-900 font-bold py-2 px-4 rounded-xl text-sm flex items-center gap-1.5">
               <i data-lucide="arrow-left" class="w-4 h-4"></i>
@@ -403,10 +403,7 @@ export function generateStandaloneHtml(config: IntegrationConfig): string {
     // =======================================================================
     // CONFIGURAÇÕES DE CONEXÃO (SUBSTITUA COM SUAS CHAVES DO SUPABASE E N8N)
     // =======================================================================
-    const SUPABASE_URL = "${supabaseUrl}";
-    const SUPABASE_ANON_KEY = "${supabaseAnonKey}";
-    const SUPABASE_TABLE = "${supabaseTable}";
-    const N8N_WEBHOOK_URL = "${n8nWebhook}";
+    const DIAGNOSTICO_API = new URL('/api/diagnostico', window.location.origin).href;
 
     // Estado local da navegação
     let currentStep = 1;
@@ -509,31 +506,30 @@ export function generateStandaloneHtml(config: IntegrationConfig): string {
       };
 
       try {
-        // 1. Enviar para a API do Supabase (REST API)
-        if (SUPABASE_URL && !SUPABASE_URL.includes('SUA_URL_SUPABASE')) {
-          await fetch(\`\${SUPABASE_URL}/rest/v1/\${SUPABASE_TABLE}\`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': SUPABASE_ANON_KEY,
-              'Authorization': \`Bearer \${SUPABASE_ANON_KEY}\`,
-              'Prefer': 'return=representation'
-            },
-            body: JSON.stringify(formData)
-          });
+        const response = await fetch(DIAGNOSTICO_API, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            nome: formData.nome,
+            whatsapp: formData.whatsapp,
+            email: formData.email,
+            empresa: formData.empresa,
+            setor: formData.setor,
+            porte: formData.porte,
+            estagio: formData.estagio,
+            estagio_nivel: formData.estagio_nivel,
+            ferramentas: formData.ferramentas,
+            areas: formData.areas,
+            obstaculo: formData.obstaculo,
+            objetivo: formData.objetivo,
+            processo: formData.processo,
+            score: 0,
+            lgpdConsent: document.getElementById('lgpdConsent')?.checked === true
+          })
+        });
+        if (!response.ok) {
+          throw new Error('Falha no envio');
         }
-
-        // 2. Enviar para o Webhook do n8n
-        if (N8N_WEBHOOK_URL && !N8N_WEBHOOK_URL.includes('SEU_N8N_INSTANCIA')) {
-          await fetch(N8N_WEBHOOK_URL, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(formData)
-          });
-        }
-
-        // Simulação de tempo de processamento se URLs não configuradas
-        await new Promise(r => setTimeout(r, 1200));
 
         // Exibir Card de Sucesso
         document.getElementById('form-container').classList.add('hidden');
