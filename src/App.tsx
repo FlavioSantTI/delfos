@@ -15,6 +15,7 @@ import { ArrowLeft } from 'lucide-react';
 import { FormData, IntegrationConfig, SubmissionResult } from './types';
 import { calculateMaturityScore, isValidEmail, isValidPhone } from './utils/mask';
 import { checkAdminSession, logoutAdmin } from './lib/adminApi';
+import { APP_VERSION_LABEL } from './version';
 
 const DEFAULT_CONFIG: IntegrationConfig = {
   postgresDbUrl: '',
@@ -376,7 +377,6 @@ export default function App() {
                     <SuccessCard
                       result={submissionResult}
                       onReset={handleReset}
-                      onOpenHtmlModal={() => setIsHtmlModalOpen(true)}
                     />
                   ) : (
                     <div className="mt-4">
@@ -432,6 +432,7 @@ export default function App() {
         <div className="max-w-5xl mx-auto px-4 space-y-1.5">
           <p className="font-semibold text-white">
             Diagnóstico de Maturidade em IA — by Flávio Santiago ConsultorIA
+            <span className="font-normal text-[#A0B2C6]"> · {APP_VERSION_LABEL}</span>
           </p>
           <p className="text-[#A0B2C6]/80">
             Ferramenta desenvolvida para diagnóstico empresarial e automação estratégica via Supabase REST API & Webhook n8n.

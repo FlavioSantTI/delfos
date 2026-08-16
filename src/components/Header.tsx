@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Database, Code2, Sparkles, BarChart3, FileText, Settings, ChevronDown, ExternalLink, Lock, ShieldCheck } from 'lucide-react';
 import { Logo } from './Logo';
+import { APP_VERSION_LABEL } from '../version';
 
 interface HeaderProps {
   onOpenIntegrationModal: () => void;
@@ -57,6 +58,7 @@ export const Header: React.FC<HeaderProps> = ({
               <p className="text-xs sm:text-sm text-[#A0B2C6] font-medium tracking-wide flex items-center gap-1.5 mt-0.5">
                 <span className="inline-block w-1.5 h-1.5 rounded-full bg-[#349885]"></span>
                 by <strong className="text-white font-semibold tracking-normal">Flávio Santiago ConsultorIA</strong>
+                <span className="text-[#A0B2C6]/70 font-normal">· {APP_VERSION_LABEL}</span>
               </p>
             </div>
           </div>

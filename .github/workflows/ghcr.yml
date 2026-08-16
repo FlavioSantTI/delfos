@@ -28,4 +28,4 @@ jobs:
           platforms: linux/amd64
           tags: |
             ghcr.io/flaviosantti/delfos:latest
-            ghcr.io/flaviosantti/delfos:1.0.0
+            ghcr.io/flaviosantti/delfos:1.1.0
