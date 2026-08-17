@@ -1,17 +1,18 @@
 import React from 'react';
-import { Check, RotateCcw, Share2, Award, Send } from 'lucide-react';
+import { Check, RotateCcw, MessageCircle, Award, Send } from 'lucide-react';
 import { SubmissionResult } from '../types';
+
+const WHATSAPP_AGENDAR_URL =
+  'https://wa.me/5563984913860?text=Quero%20agendar%20uma%20avalia%C3%A7%C3%A3o';
 
 interface SuccessCardProps {
   result: SubmissionResult;
   onReset: () => void;
-  onOpenHtmlModal: () => void;
 }
 
 export const SuccessCard: React.FC<SuccessCardProps> = ({
   result,
-  onReset,
-  onOpenHtmlModal
+  onReset
 }) => {
   const { data } = result;
 
@@ -51,13 +52,15 @@ export const SuccessCard: React.FC<SuccessCardProps> = ({
           Novo Diagnóstico
         </button>
 
-        <button
-          onClick={onOpenHtmlModal}
+        <a
+          href={WHATSAPP_AGENDAR_URL}
+          target="_blank"
+          rel="noopener noreferrer"
           className="w-full sm:w-auto px-8 py-3.5 bg-[#349885] hover:bg-[#2C8070] text-white rounded-full text-xs font-bold uppercase tracking-widest transition-all shadow-xs flex items-center justify-center gap-2"
         >
-          <Share2 className="w-4 h-4" />
-          Código HTML
-        </button>
+          <MessageCircle className="w-4 h-4" />
+          Agendar avaliação
+        </a>
       </div>
 
     </div>

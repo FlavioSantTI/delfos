@@ -1,9 +1,9 @@
-# DelfosIA 1.0 — Diagnóstico, predição e acompanhamento de maturidade
+# DelfosIA 1.1 — Diagnóstico, predição e acompanhamento de maturidade
 > **by Flávio Santiago ConsultorIA**
 
 O **DelfosIA** é uma plataforma de diagnóstico de maturidade empresarial em Inteligência Artificial. Avalia o nível da organização (Iniciante, Exploratório, Estruturado ou Avançado) em um fluxo em etapas e gera recomendações práticas, direcionamento de investimentos e plano de ação.
 
-**Versão:** 1.0.0  
+**Versão:** 1.1  
 **Repositório:** [github.com/FlavioSantTI/delfos](https://github.com/FlavioSantTI/delfos)
 
 ---

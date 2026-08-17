@@ -1,0 +1,47 @@
+version: "3.8"
+
+services:
+  delfos:
+    # IMAGEM DO GHCR (GitHub Container Registry)
+    # Sem esta imagem publicada, o Swarm fica 0/1 (task não sobe).
+    image: ghcr.io/flaviosantti/delfos:latest
+
+    environment:
+      NODE_ENV: "production"
+      HOST: "0.0.0.0"
+      PORT: "3000"
+      TRUST_PROXY: "1"
+      APP_URL: "https://delfos.flaviosantiago.com.br"
+      SUPABASE_URL: "${SUPABASE_URL}"
+      SUPABASE_ANON_KEY: "${SUPABASE_ANON_KEY}"
+      SUPABASE_SERVICE_ROLE_KEY: "${SUPABASE_SERVICE_ROLE_KEY}"
+      ADMIN_PASSWORD: "${ADMIN_PASSWORD}"
+      SESSION_SECRET: "${SESSION_SECRET}"
+
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+      # Labels estruturadas em formato de dicionário   (padrão recomendado para Swarm)
+      labels:
+        traefik.enable: "true"
+        traefik.docker.network: "Favucanet"
+        # Roteador
+        traefik.http.routers.delfos.rule: "Host(`delfos.flaviosantiago.com.br`)"
+        traefik.http.routers.delfos.entrypoints: "websecure"
+        traefik.http.routers.delfos.tls: "true"
+        traefik.http.routers.delfos.tls.certresolver: "letsencryptresolver"
+        # Vinculação explícita do roteador ao serviço interno
+        traefik.http.routers.delfos.service: "delfos-svc"
+        # Configuração do Serviço e Porta interna do container
+        traefik.http.services.delfos-svc.loadbalancer.server.port: "3000"
+
+    # Conecta à rede externa do Traefik
+    networks:
+      - Favucanet
+
+# Define a rede externa onde o Traefik está rodando
+networks:
+  Favucanet:
+    external: true
